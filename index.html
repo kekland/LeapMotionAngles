@@ -1,0 +1,184 @@
+<html>
+	<head>
+		<title>Leap Motion + JS</title>
+		<script src="//js.leapmotion.com/leap-0.6.3.js"></script>
+		<script>
+			//Position variables
+			var handPosition;
+			var handHistory = [];
+			var fingerDistance;
+			var armAngles;
+			
+			//Movement variables
+			var baseAngle, shoulderAngle, elbowAngle, clawAngle;
+			var frames = [];
+			
+			/*
+			* Settings
+			*/
+			var normalize = 3;
+			var minimumClawDistance = 15;
+			
+			//Arm lengths (mm)
+			var length1 = 160;
+			var length2 = 160;
+			
+			//Restricted leap space
+			var MAX_Y = 500;
+			var MIN_Y = 0;
+			var MIN_Z = 0;
+			var MAX_Z = 800;
+			
+			//Cache past frames : more is slower
+			var SMOOTHING_FRAMES_COUNT = 5;
+			
+			
+			var controllerOptions = {};
+			
+			Leap.loop(controllerOptions, function(frame) {
+				//We have recieved ready-to-use frame from leap motion
+				
+				if(frame.hands.length > 0) {
+					//Get hand position
+					handPosition = frame.hands[0].palmPosition;
+					
+					//Offset Z for IK purposes
+					frame.hands[0].palmPosition[1] -= 150;
+					frame.hands[0].palmPosition[2] = 200 - frame.hands[0].palmPosition[2];
+					
+					//Smooth out our input and save it in array
+					var smoothedInput = smoothInput(handPosition);
+					smoothingQueue(handPosition);
+					
+					//Restrict our input into range (to prevent physical damage)
+					//if(smoothedInput.y < MIN_Y) smoothedInput.y = MIN_Y;
+					//if(smoothedInput.y > MAX_Y) smoothedInput.y = MAX_Y;
+					//if(smoothedInput.z < MIN_Z) smoothedInput.z = MIN_Z;
+					//if(smoothedInput.z > MAX_Z) smoothedInput.z = MAX_Z;
+					
+					
+					//Calculate all of the angles to use
+					armAngles = calculateInverseKinematics(smoothedInput.y, smoothedInput.z);
+					baseAngle = calculateBaseAngle(smoothedInput.x, smoothedInput.z);
+					shoulderAngle = armAngles.theta1;
+					elbowAngle = armAngles.theta2;
+				}
+				
+				if(frame.pointables.length > 1) {
+					var f1 = frame.pointables[0];
+					var f2 = frame.pointables[1];
+					
+					fingerDistance = distance(f1.tipPosition[0], f1.tipPosition[1], f1.tipPosition[2],
+																		f2.tipPosition[0], f2.tipPosition[1], f2.tipPosition[2]);
+					
+					//console.log(fingerDistance);
+					clawAngle = 120 - fingerDistance;
+				}
+				
+				if(!isNaN(shoulderAngle) && !isNaN(elbowAngle) && !isNaN(baseAngle)) {
+					document.getElementById("angle1").innerHTML = Math.floor(shoulderAngle);
+					document.getElementById("angle2").innerHTML = Math.floor(elbowAngle);
+					document.getElementById("angle3").innerHTML = Math.floor(baseAngle);
+					document.getElementById("distance").innerHTML = Math.floor(clawAngle);
+				}
+				frames.push(frame);
+			})
+			
+			
+			function smoothInput(current) {
+				
+				//No frames to smooth out
+				if(handHistory.length === 0) {
+					return current;
+				}
+				
+				//Prepare our variables
+				var x = 0, y = 0, z = 0, i = 0, periods = handHistory.length;
+				
+				for (i = 0; i < periods; i += 1) {
+					x += current[0] + handHistory[i][0];
+					y += current[1] + handHistory[i][1];
+					z += current[2] + handHistory[i][2];
+				}
+				
+				periods += 1;
+				return {
+					x: x / periods,
+					y: y / periods,
+					z: z / periods
+				};
+			}
+			
+			function smoothingQueue(current) {
+				handHistory.unshift(current);
+				if(handHistory.length > SMOOTHING_FRAMES_COUNT) {
+					handHistory.pop();
+				}
+			}
+			
+			function calculateBaseAngle(x, z) {
+				var angle = Math.tan(x / z);
+				
+				if(isNaN(angle)) {
+					console.log("ERROR(2) : " + x + ", " + z);
+				}
+				return 90 - toDegrees(angle);
+			}
+			
+			function calculateInverseKinematics(y, z) {
+				
+				//Get hypotenuse
+				var hypotenuse = Math.sqrt(square(y) + square(z));
+				
+				//Some math tricks
+				var a = Math.atan(y / z);
+				var b = Math.acos((square(length1) + square(hypotenuse) - square(length2)) / (2 * length1 * hypotenuse));
+				
+				if(isNaN(a)) {
+					console.log("ERROR! : " + y + ", " + z);
+				}
+				//Get first angle
+				var theta1 = toDegrees(a + b);
+				
+				//Calculate second angle
+				var c = Math.acos((square(length2) + square(length1) - square(hypotenuse)) / (2 * length1 * length2));
+				var theta2 = 180 - toDegrees(c);
+				
+				return {
+					theta1 : theta1,
+					theta2 : theta2
+				};
+			}
+			
+			
+			
+			
+			
+			
+			
+			/*
+			* Utility Functions
+			*/
+			
+			function distance(x1,y1,z1,x2,y2,z2) {
+				//console.log("V1 : " + x1 + "," + y1 + "," + z1);
+				//console.log("V2 : " + x2 + "," + y2 + "," + z2);
+				return Math.sqrt(square(x2-x1)+square(y2-y1)+square(z2-z1));
+			}
+			
+			function square(x) {
+				return x*x;
+			}
+			
+			function toDegrees(r) {
+				return r*57.2957795;
+			}
+		</script>
+	</head>
+	<body>
+		<p>Angle Shoulder : <span id="angle1"></span></p>
+		<p>Angle Wrist : <span id="angle2"></span></p>
+		<p>Angle Base : <span id="angle3"></span></p>
+		<p>Distance : <span id="distance"></span></p>
+	</body>
+</html>
